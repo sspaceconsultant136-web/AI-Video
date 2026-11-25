@@ -2,8 +2,8 @@ services:
   - type: web
     name: space-consultant-ai-studio-api
     runtime: python
+    plan: free
     rootDir: backend
-    plan: starter          # free (512 MB) is too small for FFmpeg video rendering
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
@@ -12,19 +12,7 @@ services:
         value: 3.12.3
       - key: SECRET_KEY
         generateValue: true
-      - key: DATABASE_URL          # Postgres URL (Neon / Render Postgres)
+      - key: DATABASE_URL          # Neon Postgres connection string
         sync: false
-      - key: CORS_ORIGINS          # your Netlify URL, e.g. https://your-app.netlify.app
+      - key: CORS_ORIGINS          # your Netlify URL, no trailing slash
         sync: false
-      - key: REPLICATE_API_TOKEN   # optional: only for "AI Motion per scene"
-        sync: false
-      - key: REPLICATE_IMAGE_VIDEO_VERSION
-        sync: false
-      - key: OUTPUT_DIR
-        value: /var/data/generated
-      - key: UPLOAD_DIR
-        value: /var/data/uploads
-    disk:                           # keeps videos/uploads across restarts (paid plans only)
-      name: studio-data
-      mountPath: /var/data
-      sizeGB: 5
