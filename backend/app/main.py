@@ -19,6 +19,26 @@ from app.security import hash_password, verify_password, token, current_user, ad
 from app.worker import process, EFFECTS, TRANSITIONS
 
 Base.metadata.create_all(bind=engine)
+
+
+def recover_interrupted_jobs():
+    """A restart/crash kills running renders; mark them failed instead of 'processing' forever."""
+    from app.db import SessionLocal
+    message = "Server restarted while this video was being created. Please generate it again."
+    db = SessionLocal()
+    try:
+        for video in db.query(Video).filter(Video.status.in_(["pending", "processing"])).all():
+            video.status, video.error = "failed", message
+        for job in db.query(GenerationJob).filter(GenerationJob.status.in_(["pending", "processing"])).all():
+            job.status, job.error = "failed", message
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+recover_interrupted_jobs()
 app = FastAPI(title=settings.app_name, version="1.1.0")
 # CORS: include both common local frontend origins explicitly.
 # Keep configured origins for deployments, and normalize trailing slashes.
