@@ -5,6 +5,7 @@ import logging
 import math
 import re
 import subprocess
+import threading
 import time
 
 from app.db import SessionLocal
@@ -18,6 +19,7 @@ FPS = 25
 DEFAULT_VOICE = "en-IN-NeerjaNeural"
 TAIL_SECONDS = 0.8      # small silent tail after the last spoken word
 TTS_ATTEMPTS = 3        # Edge TTS sometimes fails once and works on retry
+OVERSAMPLE = 1.5        # zoom smoothness vs CPU: 2.0 = smoother but slower
 ZOOM_STRENGTH = 0.15    # 15% zoom / pan travel over one scene
 EFFECTS = ("auto", "zoom_in", "zoom_out", "pan_left", "pan_right", "none")
 AUTO_CYCLE = ("zoom_in", "zoom_out", "pan_right", "pan_left")
@@ -218,8 +220,8 @@ def motion_filter(effect, width, height, duration):
             f"scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},fps={FPS},format=yuv420p"
         )
-    # Work on a 2x image so the motion is smooth instead of jittery.
-    big_w, big_h = width * 2, height * 2
+    # Work on a slightly larger image so the motion is smooth instead of jittery.
+    big_w, big_h = int(width * OVERSAMPLE) // 2 * 2, int(height * OVERSAMPLE) // 2 * 2
     zoom_in = f"1+{ZOOM_STRENGTH}*on/{frames}"
     zoom_out = f"{1 + ZOOM_STRENGTH}-{ZOOM_STRENGTH}*on/{frames}"
     center_x, center_y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
@@ -351,7 +353,7 @@ def make_slideshow(scenes, durations, video, output_path, effects=None, transiti
                 settings.ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error",
                 "-loop", "1", "-i", str(image_path),
                 "-t", f"{duration:.3f}", "-vf", vf,
-                "-an", "-c:v", "libx264", "-preset", "veryfast",
+                "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
                 "-r", str(FPS), "-pix_fmt", "yuv420p", str(clip),
             ], timeout=max(180, int(duration) * 30))
 
@@ -471,7 +473,16 @@ def finish_video(video, silent_output, final_output, audio_path, loop_to=None):
         mux_path.unlink(missing_ok=True)
 
 
+_render_lock = threading.Semaphore(1)
+
+
 def process(video_id):
+    """Render videos one at a time; extra jobs wait (and show as pending)."""
+    with _render_lock:
+        _process(video_id)
+
+
+def _process(video_id):
     """
     Process one video and always attempt to persist a terminal status.
     Any failure is recorded as failed with a useful error instead of silently
